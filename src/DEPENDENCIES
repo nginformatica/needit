@@ -1,6 +1,6 @@
-PACKAGE haskellcamargo/needit
-PACKAGE duplicated
+PACKAGE needit
 
-NEEDS haskellcamargo/prelude-advpl
-NEEDS nginformatica/string-builder
+FROM https://github.com/
+
+NEEDS nginformatica/advpl-string-builder
 NEEDS nginformatica/advpl-debugger
