@@ -1,4 +1,5 @@
 PACKAGE haskellcamargo/needit
+PACKAGE duplicated
 
 NEEDS haskellcamargo/prelude-advpl
 NEEDS nginformatica/string-builder
