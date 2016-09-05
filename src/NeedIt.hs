@@ -72,12 +72,10 @@ getFileName :: String -> String
 getFileName name = (reverse $ takeWhile (/= '/') (reverse name)) ++ ".zip"
 
 download :: (String, String) -> IO ()
-download (url, name) = do
-    request <- parseUrl url
-    manager <- newManager tlsManagerSettings
-    runResourceT $ do
-        response <- http request manager
-        responseBody response C.$$+- sinkFile name
+download (url, name) = parseUrl url
+    >>= \request -> newManager tlsManagerSettings
+    >>= \manager -> runResourceT (http request manager
+        >>= \response -> responseBody response C.$$+- sinkFile name)
 
 asyncDownload :: [(String, String)] -> IO [()]
 asyncDownload = mapConcurrently download
