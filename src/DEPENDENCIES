@@ -1,0 +1,5 @@
+PACKAGE haskellcamargo/needit
+
+NEEDS haskellcamargo/prelude-advpl
+NEEDS nginformatica/string-builder
+NEEDS nginformatica/advpl-debugger

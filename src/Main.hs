@@ -1,6 +1,5 @@
 module Main where
-
-import NeedIt.NeedIt (getAdvPLRepo)
+import NeedIt
 
 main :: IO ()
-main = putStrLn "Base repository: " >> getLine >>= getAdvPLRepo
+main = putStrLn "Loaded"
