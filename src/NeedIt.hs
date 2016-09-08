@@ -22,6 +22,7 @@ import Control.Concurrent.Async (mapConcurrently)
 import Codec.Archive.Zip
 import qualified Data.ByteString.Lazy as B
 import Control.Applicative ((<$>))
+import System.Directory (removeFile)
 
 data State = State { package :: [String]
                    , deps    :: [String]
@@ -84,12 +85,13 @@ printDeps = extractSource >>= \monad -> case monad of
 getFileName :: String -> String
 getFileName name = (reverse $ takeWhile (/= '/') (reverse name)) ++ ".zip"
 
---download :: (String, String) -> IO ()
+download :: (String, String) -> IO ()
 download (url, name) = parseUrl url
     >>= \request -> newManager tlsManagerSettings
     >>= \manager -> runResourceT (http request manager
         >>= \response -> responseBody response C.$$+- sinkFile name)
     >>= \_ -> unzipFile name
+    >>= \_ -> removeFile name
     >>= \_ -> putStrLn $ "Installed " ++ name
 
 asyncDownload :: [(String, String)] -> IO [()]
