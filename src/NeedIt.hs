@@ -1,5 +1,15 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-module NeedIt (readDeps, extractSource, validCommands, prefix, collect', depLinks, printDeps, download, install) where
+module NeedIt (
+    readDeps,
+    extractSource,
+    validCommands,
+    prefix,
+    collect',
+    depLinks,
+    printDeps,
+    download,
+    install,
+    unzipFile) where
 import System.IO
 import Control.Exception (handle, IOException)
 import Data.List (partition)
@@ -9,12 +19,15 @@ import Network.HTTP.Conduit
 import qualified Data.Conduit as C
 import Control.Monad.Trans.Resource (runResourceT)
 import Control.Concurrent.Async (mapConcurrently)
+import Codec.Archive.Zip
+import qualified Data.ByteString.Lazy as B
+import Control.Applicative ((<$>))
 
 data State = State { package :: [String]
                    , deps    :: [String]
                    , base    :: [String]
                    }
-                     deriving Show
+                   deriving Show
 
 readDeps :: IO (Maybe [String])
 readDeps = handle (\(e :: IOException) -> return Nothing)
@@ -71,11 +84,13 @@ printDeps = extractSource >>= \monad -> case monad of
 getFileName :: String -> String
 getFileName name = (reverse $ takeWhile (/= '/') (reverse name)) ++ ".zip"
 
-download :: (String, String) -> IO ()
+--download :: (String, String) -> IO ()
 download (url, name) = parseUrl url
     >>= \request -> newManager tlsManagerSettings
     >>= \manager -> runResourceT (http request manager
         >>= \response -> responseBody response C.$$+- sinkFile name)
+    >>= \_ -> unzipFile name
+    >>= \_ -> putStrLn $ "Installed " ++ name
 
 asyncDownload :: [(String, String)] -> IO [()]
 asyncDownload = mapConcurrently download
@@ -84,3 +99,6 @@ install :: IO [()]
 install = extractSource >>= \monad -> case monad of
     Left  msg -> error msg
     Right src -> asyncDownload $ depLinks src
+
+unzipFile :: String -> IO ()
+unzipFile f = toArchive <$> B.readFile f >>= extractFilesFromArchive [OptVerbose]
