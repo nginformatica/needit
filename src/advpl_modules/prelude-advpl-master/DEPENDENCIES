@@ -1,3 +1,0 @@
-PACKAGE prelude-advpl
-FROM https://github.com/
-NEEDS nginformatica/json-advpl
