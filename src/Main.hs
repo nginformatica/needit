@@ -64,6 +64,7 @@ parseAndInstall cfg = readDeps cfg >>= \src -> case linesToTuples src of
                             hasSub <- existDepsFile newCfg
                             nop `withMessage` (Info $ "Has subrepositories? " ++ (show hasSub))
                             nop `withMessage` (Success $ "Installed " ++ pkg)
-                            if hasSub then (parseAndInstall newCfg `withMessage` Success ("Installed subpackages for " ++ pkg) else nop
+                            if hasSub then (parseAndInstall newCfg `withMessage` (Success $ "Installed subpackages for " ++ pkg))
+                                      else nop
                             return ()
             >> nop `withMessage` (Success "Successfully installed all packages")
