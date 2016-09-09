@@ -2,5 +2,4 @@ PACKAGE needit
 
 FROM https://github.com/
 
-NEEDS nginformatica/advpl-string-builder
-NEEDS nginformatica/advpl-debugger
+NEEDS nginformatica/prelude-advpl

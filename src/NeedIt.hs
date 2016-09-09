@@ -1,106 +1,171 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module NeedIt (
+    catchSyntaxErrors,
+    catchSemanticErrors,
+    clearDeps,
+    createDepsFolder,
+    downloadDep,
+    existDepsFile,
+    existDepsFolder,
+    getDepsFile,
+    getModulesFolder,
+    getPathFor,
+    linesToTuples,
+    listDependencies,
     readDeps,
-    extractSource,
-    validCommands,
-    prefix,
-    collect',
-    depLinks,
-    printDeps,
-    download,
-    install,
-    unzipFile) where
+    tuplesToDepContent,
+    unzipFile,
+    Configuration (..),
+    DepContent (..),
+    Repository (..)
+) where
 import System.IO
-import Control.Exception (handle, IOException)
-import Data.List (partition)
+import Data.List (isInfixOf)
 import Data.Char (isSpace)
 import Data.Conduit.Binary (sinkFile)
 import Network.HTTP.Conduit
 import qualified Data.Conduit as C
 import Control.Monad.Trans.Resource (runResourceT)
-import Control.Concurrent.Async (mapConcurrently)
 import Codec.Archive.Zip
 import qualified Data.ByteString.Lazy as B
-import Control.Applicative ((<$>))
-import System.Directory (removeFile)
+import Control.Applicative ((<$>), liftA2)
+import System.Directory (createDirectory, removeFile, doesFileExist, doesDirectoryExist, removeDirectoryRecursive)
+import System.FilePath (joinPath)
+import qualified Data.Text as T
+import Network.URI (parseURI)
+import Data.Maybe (isJust)
+import Debug.Trace
 
-data State = State { package :: [String]
-                   , deps    :: [String]
-                   , base    :: [String]
-                   }
-                   deriving Show
+data Repository = Self | External String
 
-readDeps :: IO (Maybe [String])
-readDeps = handle (\(e :: IOException) -> return Nothing)
-    ((openFile "DEPENDENCIES" ReadMode) >>= hGetContents >>= return . Just . lines)
+data Configuration = Configuration { basepath :: FilePath, repository :: Repository }
 
-validCommands :: [String]
-validCommands = ["PACKAGE", "NEEDS", "FROM", ""]
+data DepContent = DepContent { package :: String, source :: String, deps :: [String] }
 
-prefix :: String -> String
-prefix = takeWhile (not . isSpace)
+instance Show Configuration where
+    show cfg = foldl1 (++) ["Configuration:\n", "   · Path:       ", basepath cfg, "\n",
+        "   · Repository: ", show $ repository cfg]
 
-invalidLine :: [String] -> Int
-invalidLine = invalidLine' 1
+instance Show Repository where
+    show Self         = "self"
+    show (External r) = r
 
-invalidLine' :: Int -> [String] -> Int
-invalidLine' n [] = -1
-invalidLine' n (x:xs) | not $ elem (prefix x) validCommands = n
-                      | otherwise                           = invalidLine' (n + 1) xs
+instance Show DepContent where
+    show ct = "From " ++ (source ct) ++ ", package `" ++ (package ct) ++ "' needs\n" ++ depList
+        where depList = foldl (++) "" (map mountLn $ deps ct)
+              mountLn dep = "    · " ++ dep ++ "\n"
 
-getValue :: [String] -> [String]
-getValue = map (tail . dropWhile (not . isSpace))
+infixl 0 |>
+(|>) :: a -> (a -> b) -> b
+(|>) x f = f x
 
-collect' :: [String] -> ([String], [String], [String])
-collect' xss =
-    let
-        packages' = filterBy "PACKAGE"
-        deps'     = filterBy "NEEDS"
-        base'     = filterBy "FROM"
-    in (packages', deps', base') where filterBy name = getValue $ filter (\x -> (prefix x) == name) xss
+clearDeps :: Configuration -> IO ()
+clearDeps = removeDirectoryRecursive . getModulesFolder
 
-extractSource :: IO (Either String State)
-extractSource = readDeps >>= \monad -> return $ case monad of
-    Nothing -> Left "Failed to open DEPENDENCIES"
-    Just xs -> case invalidLine xs of
-        -1 -> case collect' xs of
-            ([], _, _)      -> Left "Package name not informed"
-            (_, _, [])      -> Left "Base name not informed"
-            ((_:_:_), _, _) -> Left "More than one entry for package name"
-            (_, _, (_:_:_)) -> Left "More than one origin informed"
-            (p', d', b')    -> Right $ State { package = p', deps = d', base = b' }
-        n  -> Left $ "Parsing error on line " ++ (show n) ++ ": " ++ (xs !! (n - 1))
+createDepsFolder :: Configuration -> IO ()
+createDepsFolder = createDirectory . getModulesFolder
 
-depLinks :: State -> [(String, String)]
-depLinks src = map compose (deps src)
-    where
-        baseUrl = head $ base src
-        compose dep = (baseUrl ++ dep ++ "/archive/master.zip", getFileName dep)
+existDepsFile :: Configuration -> IO Bool
+existDepsFile = doesFileExist . getDepsFile
 
-printDeps :: IO ()
-printDeps = extractSource >>= \monad -> case monad of
-    Left  msg -> error msg
-    Right src -> mapM_ (print . fst) (depLinks src)
+existDepsFolder :: Configuration -> IO Bool
+existDepsFolder = doesDirectoryExist . getModulesFolder
+
+getDepsFile :: Configuration -> FilePath
+getDepsFile cfg = joinPath [basepath cfg, "DEPENDENCIES"]
+
+getPathFor :: Configuration -> FilePath
+getPathFor cfg = joinPath $ [basepath cfg] ++ case repository cfg of
+    Self       -> []
+    External r -> [r]
+
+getModulesFolder :: Configuration -> FilePath
+getModulesFolder cfg = joinPath [basepath cfg, "advpl_modules"]
+
+readDeps :: Configuration -> IO [String]
+readDeps cfg = getDepsFile cfg
+    |> \filename -> openFile filename ReadMode
+        >>= hGetContents
+        >>= return . lines
+
+validWords :: String -> Bool
+validWords = (liftA2 (||) (== 2) (== 0)) . length . words
+
+validDeclaration :: String -> Bool
+validDeclaration = (liftA2 (||)
+    (\c -> (length c) == 0)
+    (\c -> (c !! 0) `elem` ["PACKAGE", "FROM", "NEEDS"])) . words
+
+validNeeds :: String -> Bool
+validNeeds x =
+    (command /= "NEEDS") || -- Not a NEEDS directive
+    ("/" `isInfixOf` x)
+        where (command, value) = listToPair . words $ x
+
+validSource :: String -> Bool
+validSource x =
+    (command /= "FROM") || -- Not a FROM directive
+    (isJust $ parseURI value)
+        where (command, value) = listToPair . words $ x
+
+short :: String -> String
+short str | length str < 10 = str
+          | otherwise       = (++ "...") $ take 7 str
+
+countBy :: (a -> Bool) -> [a] -> Int
+countBy pred = length . filter pred
+
+listToPair :: [String] -> (String, String)
+listToPair (a:b:_) = (a, b)
+listToPair _       = ("", "")
 
 getFileName :: String -> String
 getFileName name = (reverse $ takeWhile (/= '/') (reverse name)) ++ ".zip"
 
-download :: (String, String) -> IO ()
-download (url, name) = parseUrl url
+catchSyntaxErrors :: [String] -> Maybe (String, Int)
+catchSyntaxErrors = catchErrors' 1
+    where catchErrors' n [] = Nothing
+          catchErrors' n (x:xs) | (not . validWords) x       = Just ("Wrong size declaration", n)
+                                | (not . validDeclaration) x = Just ("Unknown declaration `" ++ (short x) ++ "'", n)
+                                | (not . validNeeds) x       = Just ("Invalid repository passed for NEEDS", n)
+                                | (not . validSource) x      = Just ("Invalid source base", n)
+                                | otherwise                  = catchErrors' (n + 1) xs
+
+catchSemanticErrors :: [(String, String)] -> Maybe String
+catchSemanticErrors xss | nPackages == 0 = Just "No package name provided"
+                        | nPackages  > 1 = Just "Too many package names provided"
+                        | nSources  == 0 = Just "No source base provided"
+                        | nSources   > 1 = Just "Too many source bases provided"
+                        | otherwise      = Nothing
+                        where countByCommand cmd = countBy (\pair -> (fst pair) == cmd) $ xss
+                              nPackages = countByCommand "PACKAGE"
+                              nSources  = countByCommand "FROM"
+
+linesToTuples :: [String] -> Either (String, Int) [(String, String)]
+linesToTuples xss = case catchSyntaxErrors xss of
+    Nothing  -> Right (xss |> map words
+                           |> filter (\l -> length l == 2)
+                           |> map listToPair)
+    Just err -> Left err
+
+tuplesToDepContent :: [(String, String)] -> DepContent
+tuplesToDepContent tuples = DepContent { package = (getByCommand "PACKAGE") !! 0
+                                       , source  = (getByCommand "FROM") !! 0
+                                       , deps    = (getByCommand "NEEDS") }
+                            where getByCommand cmd = map snd $ filter (\pair -> (fst pair) == cmd) tuples
+
+listDependencies :: DepContent -> [(String, String, String)]
+listDependencies ct = map toPairWithLink $ deps ct
+    where baseUrl = source ct
+          toPairWithLink dep = (dep, baseUrl ++ dep ++ "/archive/master.zip", getFileName dep)
+
+downloadDep :: (String, String, String) -> IO ()
+downloadDep (repository, url, filename) = parseUrl url
     >>= \request -> newManager tlsManagerSettings
     >>= \manager -> runResourceT (http request manager
-        >>= \response -> responseBody response C.$$+- sinkFile name)
-    >>= \_ -> unzipFile name
-    >>= \_ -> removeFile name
-    >>= \_ -> putStrLn $ "Installed " ++ name
+        >>= \response -> responseBody response C.$$+- sinkFile $ joinPath ["advpl_modules/", filename])
 
-asyncDownload :: [(String, String)] -> IO [()]
-asyncDownload = mapConcurrently download
+unzipFile :: FilePath -> IO ()
+unzipFile f = toArchive <$> B.readFile f
+    >>= extractFilesFromArchive [OptVerbose, OptRecursive, OptDestination "./advpl_modules"]
 
-install :: IO [()]
-install = extractSource >>= \monad -> case monad of
-    Left  msg -> error msg
-    Right src -> asyncDownload $ depLinks src
-
-unzipFile :: String -> IO ()
-unzipFile f = toArchive <$> B.readFile f >>= extractFilesFromArchive [OptVerbose]
