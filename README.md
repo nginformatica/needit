@@ -10,6 +10,8 @@ NeedIt is a fast and simple and concise package manager for TOTVS AdvPL written 
 
 It'll look for a `DEPENDENCIES` file on your root and install its packages
 
+![Example](./image.png)
+
 ## Meta-syntax
 
 NeedIt provides a small DSL to create your packages, like:
