@@ -48,7 +48,7 @@ instance Show Configuration where
 
 instance Show Repository where
     show Self         = "self"
-    show (External r) = r
+    show (External r) = take ((length r) - 4) r
 
 instance Show DepContent where
     show ct = "From " ++ (source ct) ++ ", package `" ++ (package ct) ++ "' needs\n" ++ depList

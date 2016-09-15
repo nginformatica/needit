@@ -27,13 +27,13 @@ withMessage io (Success msg) = io >> printColored Green msg
 withMessage io (Error err)   = io >> printColored Red err
 
 intro :: IO ()
-intro = setSGR [SetColor Foreground Vivid Cyan]
+intro = setSGR [SetColor Foreground Vivid Magenta]
+    >> renderLogo
+    >> setSGR [SetColor Foreground Vivid Cyan]
     >> putStrLn "NeedIt AdvPL v0.1"
     >> setSGR [Reset]
 
-main = intro
-    >> putStrLn (show cfg)
-    >> existDepsFolder cfg >>= \existance -> case existance of
+main = intro >> existDepsFolder cfg >>= \existance -> case existance of
         True  -> clearDeps cfg `withMessage` (Info "Cleaning advpl_modules...")
         False -> nop
     >> createDepsFolder cfg `withMessage` (Info "Creating dependencies folder...")
@@ -42,7 +42,7 @@ main = intro
         False -> clearDeps cfg
               >> nop `withMessage` (Error "DEPENDENCIES file not found")
 
-parseAndInstall cfg = readDeps cfg >>= \src -> case linesToTuples src of
+parseAndInstall cfg = putStrLn (show cfg) >> readDeps cfg >>= \src -> case linesToTuples src of
     Left (msg, line) -> nop `withMessage` (Error $ msg ++ " on line " ++ (show line))
     Right tuples     -> case catchSemanticErrors tuples of
         Just err -> nop `withMessage` (Error err)
@@ -72,3 +72,10 @@ parseAndInstall cfg = readDeps cfg >>= \src -> case linesToTuples src of
 
 dropModule :: String -> IO ()
 dropModule name = removeFile $ joinPath ["advpl_modules", name]
+
+renderLogo :: IO ()
+renderLogo = mapM_ putStrLn [ " _   _               _ ___ _   "
+                            , "| \\ | | ___  ___  __| |_ _| |_ "
+                            , "|  \\| |/ _ \\/ _ \\/ _` || || __|"
+                            , "| |\\  |  __/  __/ (_| || || |_ "
+                            , "|_| \\_|\\___|\\___|\\__,_|___|\\__|" ]
