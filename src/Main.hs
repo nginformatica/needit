@@ -39,7 +39,8 @@ main = intro
     >> createDepsFolder cfg `withMessage` (Info "Creating dependencies folder...")
     >> existDepsFile cfg >>= \existance -> case existance of
         True  -> parseAndInstall cfg `withMessage` (Info "DONE")
-        False -> nop `withMessage` (Error "DEPENDENCIES file not found")
+        False -> clearDeps cfg
+              >> nop `withMessage` (Error "DEPENDENCIES file not found")
 
 parseAndInstall cfg = readDeps cfg >>= \src -> case linesToTuples src of
     Left (msg, line) -> nop `withMessage` (Error $ msg ++ " on line " ++ (show line))
