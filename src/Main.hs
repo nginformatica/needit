@@ -57,7 +57,6 @@ parseAndInstall cfg = readDeps cfg >>= \src -> case linesToTuples src of
                         >>= \cfg -> do
                             let filepath = getPathFor cfg
                             unzipFile filepath
-                            removeFile $ joinPath ["advpl_modules/", file]
                             let basename = joinPath ["./", "advpl_modules/", tail (dropWhile (/= '/') pkg) ++ "-master"]
                             let newCfg = Configuration { basepath = basename, repository = repository cfg }
                             nop `withMessage` (Info $ "Looking for subrepositories for " ++ pkg)
@@ -67,4 +66,8 @@ parseAndInstall cfg = readDeps cfg >>= \src -> case linesToTuples src of
                             if hasSub then (parseAndInstall newCfg `withMessage` (Success $ "Installed subpackages for " ++ pkg))
                                       else nop
                             return ()
+                        >> dropModule file
             >> nop `withMessage` (Success "Successfully installed all packages")
+
+dropModule :: String -> IO ()
+dropModule name = removeFile $ joinPath ["advpl_modules", name]
